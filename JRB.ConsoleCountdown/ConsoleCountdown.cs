@@ -56,48 +56,132 @@ namespace JRB.ConsoleCountdown
 
         #endregion
 
-        #region - Public Methods -
+        #region - Methods -
 
-        public CountdownResult Prompt(int startingSeconds)
+        public CountdownResult? Prompt(int startingSeconds)
         {
-            //Slug slug = Slug.CreateHere(FixedFieldLength);
             NestedTimerSlug slug = NestedTimerSlug.CreateHere(TimesUpMessage, FixedFieldLength);
-            Console.WriteLine();
             TimeSpan timeRemaining = TimeSpan.FromSeconds(startingSeconds);
             slug.UpdateDisplay(timeRemaining);
 
-            while (timeRemaining > TimeSpan.Zero)
+            TimerCheckEvent timerCheckEvent = new TimerCheckEvent(timeRemaining, slug);
+            using (Timer timer = new Timer(CheckTimer, timerCheckEvent, DelayMilliseconds, DelayMilliseconds))
             {
-                if (Console.KeyAvailable)
-                {
-                    ConsoleKeyInfo keyInfo = Console.ReadKey(true);
-                    KeyPressedEventArgs eventArgs = new KeyPressedEventArgs(keyInfo);
-                    this.KeyPressed?.Invoke(this, eventArgs);
-
-                    if (eventArgs.StopTimer)
-                    {
-                        return new CountdownResult()
-                        {
-                            PromptResult = PromptResult.UserStopped,
-                            KeyPressed = keyInfo,
-                            Message = eventArgs.Message
-                        };
-                    }
-                }
-                Thread.Sleep(DelayMilliseconds);
-                timeRemaining = timeRemaining.Subtract(_interval);
-                slug.UpdateDisplay(timeRemaining);
+                timerCheckEvent.WaitOne();
             }
 
-            return new CountdownResult()
+            return timerCheckEvent.Result;
+        }
+
+        private void CheckTimer(object? stateInfo)
+        {
+            TimerCheckEvent? timerCheckEvent = stateInfo as TimerCheckEvent;
+            if (timerCheckEvent == null)
             {
-                PromptResult = PromptResult.TimerExpired
-            };
+                throw new InvalidOperationException("The timer check event should never be null.");
+            }
+
+            if (Console.KeyAvailable)
+            {
+                ConsoleKeyInfo keyInfo = Console.ReadKey(true);
+                KeyPressedEventArgs eventArgs = new KeyPressedEventArgs(keyInfo);
+                this.KeyPressed?.Invoke(this, eventArgs);
+
+                if (eventArgs.StopTimer)
+                {
+                    timerCheckEvent.Result = new CountdownResult()
+                    {
+                        PromptResult = PromptResult.UserStopped,
+                        KeyPressed = keyInfo,
+                        Message = eventArgs.Message
+                    };
+                    timerCheckEvent.Set();
+                    return;
+                }
+            }
+
+            timerCheckEvent.SubtractMilliseconds(DelayMilliseconds);
+            timerCheckEvent.UpdateDisplay();
+            if (timerCheckEvent.TimerExpired())
+            {
+                timerCheckEvent.Result = new CountdownResult()
+                {
+                    PromptResult = PromptResult.TimerExpired
+                };
+                timerCheckEvent.Set();
+                return;
+            }
+
         }
 
         #endregion
 
         #region - Nested Classes -
+
+        private sealed class TimerCheckEvent
+        {
+
+            private EventWaitHandle _eventWaitHandle;
+            private NestedTimerSlug _slug;
+
+            private object _timeRemainingLock = new object();
+            private object _slugLock = new object();
+
+            public TimerCheckEvent(TimeSpan timeRemaining, NestedTimerSlug slug)
+            {
+                _eventWaitHandle = new AutoResetEvent(false);
+                this.TimeRemaining = timeRemaining;
+                _slug = slug;
+                this.Result = null;
+            }
+
+            public TimeSpan TimeRemaining { get; private set; }
+            public CountdownResult? Result { get; set; }
+
+            public bool TimerExpired()
+            {
+                lock (_timeRemainingLock)
+                {
+                    return TimeRemaining <= TimeSpan.Zero;
+                }
+            }
+
+            public bool Reset() => _eventWaitHandle.Reset();
+            public bool Set() => _eventWaitHandle.Set();
+            public bool WaitOne() => _eventWaitHandle.WaitOne();
+
+            public void SubtractTime(TimeSpan elapsed)
+            {
+                lock (_timeRemainingLock)
+                {
+                    if (this.TimeRemaining <= TimeSpan.Zero)
+                    {
+                        return;
+                    }
+
+                    this.TimeRemaining -= elapsed;
+
+                    if (this.TimeRemaining < TimeSpan.Zero)
+                    {
+                        this.TimeRemaining = TimeSpan.Zero;
+                    }
+                }
+            }
+
+            public void SubtractMilliseconds(int milliseconds)
+            {
+                SubtractTime(TimeSpan.FromMilliseconds(milliseconds));
+            }
+
+            public void UpdateDisplay()
+            {
+                lock (_slugLock)
+                {
+                    _slug.UpdateDisplay(TimeRemaining);
+                }
+            }
+
+        }
 
         private class NestedTimerSlug
         {

@@ -9,10 +9,17 @@ namespace JRB.ConsoleCountdown.TestConsole
 
         static void Main(string[] args)
         {
+            Console.WriteLine("Press any key to start the timer.");
+            Console.ReadKey(true);
+
             Console.Write("Timer:  ");
             ConsoleCountdown countdown = new ConsoleCountdown();
             countdown.KeyPressed += Countdown_KeyPressed;
-            CountdownResult result = countdown.Prompt(30);
+            CountdownResult? result = countdown.Prompt(30);
+            Console.WriteLine();
+
+            if (result == null)
+                throw new InvalidOperationException("The result should never be null.");
 
             switch (result.PromptResult)
             {
