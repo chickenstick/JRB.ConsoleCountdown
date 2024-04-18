@@ -1,6 +1,7 @@
 ﻿using JRB.RewriteableConsoleContent;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -37,6 +38,7 @@ namespace JRB.ConsoleCountdown
             this.DelayMilliseconds = delayMilliseconds;
             this.FixedFieldLength = fixedFieldLength;
             this.TimesUpMessage = timesUpMessage;
+            this.CountdownState = CountdownState.NotStarted;
 
             _interval = TimeSpan.FromMilliseconds(delayMilliseconds);
         }
@@ -53,6 +55,7 @@ namespace JRB.ConsoleCountdown
         public int DelayMilliseconds { get; private set; }
         public int FixedFieldLength { get; private set; }
         public string TimesUpMessage { get; private set; }
+        public CountdownState CountdownState { get; private set; }
 
         #endregion
 
@@ -63,6 +66,7 @@ namespace JRB.ConsoleCountdown
             NestedTimerSlug slug = NestedTimerSlug.CreateHere(TimesUpMessage, FixedFieldLength);
             TimeSpan timeRemaining = TimeSpan.FromSeconds(startingSeconds);
             slug.UpdateDisplay(timeRemaining);
+            CountdownState = CountdownState.Running;
 
             TimerCheckEvent timerCheckEvent = new TimerCheckEvent(timeRemaining, slug);
             using (Timer timer = new Timer(CheckTimer, timerCheckEvent, DelayMilliseconds, DelayMilliseconds))
@@ -87,18 +91,25 @@ namespace JRB.ConsoleCountdown
                 KeyPressedEventArgs eventArgs = new KeyPressedEventArgs(keyInfo);
                 this.KeyPressed?.Invoke(this, eventArgs);
 
-                if (eventArgs.StopTimer)
+                switch (eventArgs.TimerAction)
                 {
-                    timerCheckEvent.Result = new CountdownResult()
-                    {
-                        PromptResult = PromptResult.UserStopped,
-                        KeyPressed = keyInfo,
-                        Message = eventArgs.Message
-                    };
-                    timerCheckEvent.Set();
-                    return;
+                    case TimerAction.Stop:
+                        StopTimer(timerCheckEvent, keyInfo, eventArgs);
+                        return;
+                    case TimerAction.Pause:
+                        PauseTimer(timerCheckEvent, keyInfo, eventArgs);
+                        return;
+                    case TimerAction.Restart:
+                        RestartTimer(timerCheckEvent, keyInfo, eventArgs);
+                        return;
+                    case TimerAction.None:
+                    default:
+                        break;
                 }
             }
+
+            if (CountdownState == CountdownState.Paused)
+                return;
 
             timerCheckEvent.SubtractMilliseconds(DelayMilliseconds);
             timerCheckEvent.UpdateDisplay();
@@ -108,10 +119,57 @@ namespace JRB.ConsoleCountdown
                 {
                     PromptResult = PromptResult.TimerExpired
                 };
-                timerCheckEvent.Set();
+                timerCheckEvent.EndWait();
+                CountdownState = CountdownState.Expired;
                 return;
             }
+        }
 
+        void StopTimer(TimerCheckEvent timerCheckEvent, ConsoleKeyInfo keyInfo, KeyPressedEventArgs eventArgs)
+        {
+            timerCheckEvent.Result = new CountdownResult()
+            {
+                PromptResult = PromptResult.UserStopped,
+                KeyPressed = keyInfo,
+                Message = eventArgs.Message
+            };
+            CountdownState = CountdownState.UserStopped;
+
+            if (!string.IsNullOrWhiteSpace(eventArgs.Message))
+            {
+                timerCheckEvent.OverrideText(eventArgs.Message);
+            }
+
+            // This stops the hold on the thread running the timer, and allows execution to continue.
+            timerCheckEvent.EndWait();
+        }
+
+        void PauseTimer(TimerCheckEvent timerCheckEvent, ConsoleKeyInfo keyInfo, KeyPressedEventArgs eventArgs)
+        {
+            timerCheckEvent.Result = new CountdownResult()
+            {
+                PromptResult = PromptResult.UserPaused,
+                KeyPressed = keyInfo,
+                Message = eventArgs.Message
+            };
+            CountdownState = CountdownState.Paused;
+
+            if (!string.IsNullOrWhiteSpace(eventArgs.Message))
+            {
+                timerCheckEvent.OverrideText(eventArgs.Message);
+            }
+        }
+
+        void RestartTimer(TimerCheckEvent timerCheckEvent, ConsoleKeyInfo keyInfo, KeyPressedEventArgs eventArgs)
+        {
+            timerCheckEvent.Result = new CountdownResult()
+            {
+                PromptResult = PromptResult.UserRestarted,
+                KeyPressed = keyInfo,
+                Message = eventArgs.Message
+            };
+            CountdownState = CountdownState.Running;
+            timerCheckEvent.UpdateDisplay(true);
         }
 
         #endregion
@@ -147,7 +205,7 @@ namespace JRB.ConsoleCountdown
             }
 
             public bool Reset() => _eventWaitHandle.Reset();
-            public bool Set() => _eventWaitHandle.Set();
+            public bool EndWait() => _eventWaitHandle.Set();
             public bool WaitOne() => _eventWaitHandle.WaitOne();
 
             public void SubtractTime(TimeSpan elapsed)
@@ -173,11 +231,21 @@ namespace JRB.ConsoleCountdown
                 SubtractTime(TimeSpan.FromMilliseconds(milliseconds));
             }
 
-            public void UpdateDisplay()
+            public void UpdateDisplay() => UpdateDisplay(false);
+
+            public void UpdateDisplay(bool forceUpdate)
             {
                 lock (_slugLock)
                 {
-                    _slug.UpdateDisplay(TimeRemaining);
+                    _slug.UpdateDisplay(TimeRemaining, forceUpdate);
+                }
+            }
+
+            public void OverrideText(string message)
+            {
+                lock (_slugLock)
+                {
+                    _slug.OverrideText(message);
                 }
             }
 
@@ -203,16 +271,20 @@ namespace JRB.ConsoleCountdown
                 return new NestedTimerSlug(slug, timesUpMessage);
             }
 
-            public void UpdateDisplay(TimeSpan remaining)
+            public void UpdateDisplay(TimeSpan remaining) => UpdateDisplay(remaining, false);
+
+            public void UpdateDisplay(TimeSpan remaining, bool forceUpdate)
             {
                 int secondsRemaining = GetSecondsRemaining(remaining);
-                if (!_currentDisplayedSeconds.HasValue || secondsRemaining != _currentDisplayedSeconds.Value)
+                if (forceUpdate || !_currentDisplayedSeconds.HasValue || secondsRemaining != _currentDisplayedSeconds.Value)
                 {
                     _currentDisplayedSeconds = secondsRemaining;
                     string s = (secondsRemaining > 0) ? secondsRemaining.ToString() : _timesUpMessage;
                     _slug.Write(s, Alignment.Left, true);
                 }
             }
+
+            public void OverrideText(string message) => _slug.Write(message, Alignment.Left, true);
 
             private int GetSecondsRemaining(TimeSpan remaining) => (int)Math.Ceiling(remaining.TotalSeconds);
 

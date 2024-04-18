@@ -6,12 +6,11 @@ using System.Threading.Tasks;
 
 namespace JRB.ConsoleCountdown
 {
-    public enum PromptResult
+    public enum TimerAction
     {
-        Unknown,
-        TimerExpired,
-        UserStopped,
-        UserPaused,
-        UserRestarted
+        None,
+        Stop,
+        Pause,
+        Restart
     }
 }

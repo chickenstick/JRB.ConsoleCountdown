@@ -15,7 +15,7 @@ namespace JRB.ConsoleCountdown
             : base()
         {
             this.KeyInfo = keyInfo;
-            this.StopTimer = false;
+            this.TimerAction = TimerAction.None;
             this.Message = string.Empty;
         }
 
@@ -24,7 +24,7 @@ namespace JRB.ConsoleCountdown
         #region - Properties -
 
         public ConsoleKeyInfo KeyInfo { get; private set; }
-        public bool StopTimer { get; set; }
+        public TimerAction TimerAction { get; set; }
         public string Message { get; set; }
 
         #endregion

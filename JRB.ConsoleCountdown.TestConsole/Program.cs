@@ -27,7 +27,7 @@ namespace JRB.ConsoleCountdown.TestConsole
                     Console.WriteLine("The timer expired.");
                     break;
                 case PromptResult.UserStopped:
-                    Console.WriteLine("User stopped.");
+                    Console.WriteLine(result.Message);
                     if (result.KeyPressed.HasValue)
                     {
                         Console.WriteLine(result.KeyPressed.Value.KeyChar);
@@ -36,6 +36,11 @@ namespace JRB.ConsoleCountdown.TestConsole
                     {
                         Console.WriteLine("The KeyPressed property is still null.");
                     }
+                    break;
+                case PromptResult.UserPaused:
+
+                    break;
+                case PromptResult.UserRestarted:
                     break;
                 case PromptResult.Unknown:
                 default:
@@ -50,8 +55,17 @@ namespace JRB.ConsoleCountdown.TestConsole
         {
             if (e.KeyInfo.KeyChar == 'c' || e.KeyInfo.KeyChar == 'C')
             {
-                e.StopTimer = true;
+                e.TimerAction = TimerAction.Stop;
                 e.Message = "User stopped.";
+            }
+            else if (e.KeyInfo.KeyChar == 'p' || e.KeyInfo.KeyChar == 'P')
+            {
+                e.TimerAction = TimerAction.Pause;
+                e.Message = "Paused";
+            }
+            else if (e.KeyInfo.KeyChar == 'r' || e.KeyInfo.KeyChar == 'R')
+            {
+                e.TimerAction = TimerAction.Restart;
             }
         }
     }
